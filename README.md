@@ -5,19 +5,36 @@ motor metrics — tremor frequency, finger-tapping performance, joint range of
 motion, and bilateral asymmetry — using only classical signal processing, no
 medical dataset, and no trained model?
 
+Tracks up to 2 hands (42 landmarks total) and extracts 5 quantitative motor
+metrics in real time from a single consumer webcam.
+
+Unlike most MediaPipe hand-tracking demos, which stop at visualization or
+gesture recognition, BioMotion treats the tracked landmarks as time-series
+signals and extracts quantitative motor metrics from them (FFT/Welch peak
+detection, joint-angle geometry, decrement trend fitting) — the landmarks
+are the sensor, not the end product.
+
+```
+webcam -> MediaPipe -> 21 landmarks/hand -> filtering (detrend, high-pass)
+       -> FFT / peak-picking / joint-angle geometry -> motor metrics
+```
+
 | Metric | Clinical relevance |
 |---|---|
-| Tremor frequency | Parkinson's disease, essential tremor |
-| Finger tap rate | Bradykinesia screening |
-| Amplitude/speed decrement | MDS-UPDRS motor exam (item 3.6) |
+| Tremor frequency | Tremor characterization in disorders such as Parkinson's disease and essential tremor |
+| Finger tap rate | Finger-tapping metrics commonly used in bradykinesia assessment |
+| Amplitude/speed decrement | Mirrors the MDS-UPDRS motor exam (item 3.6) methodology |
 | Joint ROM | Post-surgical / stroke rehab tracking |
-| Bilateral asymmetry | Hemiparesis, Parkinsonian asymmetry |
+| Bilateral asymmetry | Relevant to hemiparesis and Parkinsonian asymmetry |
 
 > BioMotion demonstrates that clinically relevant motor metrics can be
 > extracted from consumer-grade webcams using markerless hand tracking and
 > classical signal processing. It is a research prototype for quantitative
-> motor assessment, not a diagnostic tool — it has not been validated
-> against patient data or a clinical population.
+> motor assessment, not a diagnostic or screening tool — it has not been
+> validated against patient data or a clinical population.
+
+**Design principles:** no training required · no proprietary datasets ·
+fully reproducible · runs on commodity hardware · open-source components only.
 
 ## What we built
 
