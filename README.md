@@ -5,6 +5,20 @@ motor metrics — tremor frequency, finger-tapping performance, joint range of
 motion, and bilateral asymmetry — using only classical signal processing, no
 medical dataset, and no trained model?
 
+| Metric | Clinical relevance |
+|---|---|
+| Tremor frequency | Parkinson's disease, essential tremor |
+| Finger tap rate | Bradykinesia screening |
+| Amplitude/speed decrement | MDS-UPDRS motor exam (item 3.6) |
+| Joint ROM | Post-surgical / stroke rehab tracking |
+| Bilateral asymmetry | Hemiparesis, Parkinsonian asymmetry |
+
+> BioMotion demonstrates that clinically relevant motor metrics can be
+> extracted from consumer-grade webcams using markerless hand tracking and
+> classical signal processing. It is a research prototype for quantitative
+> motor assessment, not a diagnostic tool — it has not been validated
+> against patient data or a clinical population.
+
 ## What we built
 
 - **`python/`** — capture (both hands, all 21 landmarks/hand) + 5 analysis
@@ -99,6 +113,7 @@ python analyze_decrement.py ../data/name.csv
 python analyze_rom.py ../data/name.csv
 python analyze_asymmetry.py ../data/name.csv   # needs both hands in the clip
 python record_demo.py --seconds 10       # hands-free demo recorder
+python analyze_reliability.py --target-hz 2.0 ../data/2hz_trial*.csv  # aggregate repeated trials
 ```
 
 All analysis scripts take `--hand Left`/`--hand Right` (default: whichever
@@ -131,3 +146,13 @@ One row per hand per frame: `frame, t_sec, hand, handedness_score, lm0_x, lm0_y,
 - Inter-finger independence during tapping (spasticity/coordination marker).
 - Grip aperture over time (reach-to-grasp kinematics).
 - Port the web spiral test into Python for offline scoring.
+
+Robustness questions not yet tested, with a concrete protocol for each
+(`analyze_reliability.py` aggregates the results once trials exist):
+- **Test-retest reliability**: record the same task on separate days, check
+  whether the detected metric stays stable.
+- **Cross-device agreement**: same task on a laptop webcam, phone webcam,
+  and USB webcam, compare detected values.
+- **Lighting robustness**: same task in a bright room, dim room, and
+  backlit, check for accuracy degradation.
+- **Distance robustness**: same task at ~50cm, 1m, and 2m from the camera.
