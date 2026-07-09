@@ -3,7 +3,3 @@ __pycache__/
 
 # downloaded model asset -- fetched via the curl command in the README setup step
 python/models/
-
-# raw session recordings and their ad-hoc plots -- personal, regenerable via capture.py;
-# curated example plots for the README live in docs/images/ instead
-data/
