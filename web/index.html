@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>BioMotion — Hand Tremor & Motion Tracker</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; height: 100%; background: #05060a; color: #e8ecf1;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  #stage {
+    position: relative; width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+  }
+  video, canvas {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scaleX(-1);
+    max-width: 100%; max-height: 100%;
+  }
+  video { visibility: hidden; }
+  #hud {
+    position: absolute; top: 16px; left: 16px; z-index: 5;
+    background: rgba(10, 12, 20, 0.55); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+    padding: 14px 18px; min-width: 220px;
+  }
+  #hud h1 { font-size: 14px; margin: 0 0 10px; letter-spacing: 0.04em; color: #9ad8ff; }
+  .metric { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; margin: 4px 0; }
+  .metric b { font-size: 15px; color: #fff; font-variant-numeric: tabular-nums; }
+  #status { position: absolute; bottom: 16px; left: 16px; z-index: 5; font-size: 12px; color: #9aa4b2; }
+  #modeBar { position: absolute; top: 16px; right: 16px; z-index: 5; display: flex; gap: 8px; }
+  button {
+    background: rgba(255,255,255,0.06); color: #e8ecf1; border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
+  button.active { background: #2a7fff; border-color: #2a7fff; }
+  #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: #9aa4b2; z-index: 10; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="loading">loading model…</div>
+  <video id="video" playsinline></video>
+  <canvas id="canvas"></canvas>
+  <div id="hud">
+    <h1>BIOMOTION LIVE</h1>
+    <div class="metric"><span>mode</span><b id="modeLabel">tremor</b></div>
+    <div class="metric"><span>tremor freq</span><b id="freqVal">–</b></div>
+    <div class="metric"><span>in-band power</span><b id="powVal">–</b></div>
+    <div class="metric"><span>tap rate</span><b id="tapVal">–</b></div>
+    <div class="metric"><span>spiral RMS dev</span><b id="spiralVal">–</b></div>
+    <div class="metric"><span>fps</span><b id="fpsVal">–</b></div>
+  </div>
+  <div id="modeBar">
+    <button id="btnTremor" class="active">Tremor</button>
+    <button id="btnTap">Tap test</button>
+    <button id="btnSpiral">Spiral trace</button>
+  </div>
+  <div id="status">Hold your index finger up to the camera. Tremor: keep hand steady or shake rhythmically. Tap test: tap thumb+index together. Spiral trace: trace the guide spiral with your fingertip — press [r] to reset the score.</div>
+</div>
+
+<script type="module">
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const loading = document.getElementById("loading");
+const freqVal = document.getElementById("freqVal");
+const powVal = document.getElementById("powVal");
+const tapVal = document.getElementById("tapVal");
+const spiralVal = document.getElementById("spiralVal");
+const fpsVal = document.getElementById("fpsVal");
+const modeLabel = document.getElementById("modeLabel");
+const btnTremor = document.getElementById("btnTremor");
+const btnTap = document.getElementById("btnTap");
+const btnSpiral = document.getElementById("btnSpiral");
+
+let mode = "tremor";
+btnTremor.onclick = () => setMode("tremor");
+btnTap.onclick = () => setMode("tap");
+btnSpiral.onclick = () => setMode("spiral");
+function setMode(m) {
+  mode = m;
+  modeLabel.textContent = m;
+  btnTremor.classList.toggle("active", m === "tremor");
+  btnTap.classList.toggle("active", m === "tap");
+  btnSpiral.classList.toggle("active", m === "spiral");
+  if (m === "spiral") resetSpiralScore();
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "r" || e.key === "R") {
+    trail = [];
+    tapTimes = [];
+    resetSpiralScore();
+  }
+});
+
+const INDEX_TIP = 8, THUMB_TIP = 4;
+const TRAIL_MS = 700;
+let trail = []; // {x,y,t}
+
+// rolling buffer of {t, x, y} for tremor DFT (normalized coords)
+const BUF_SECONDS = 3.0;
+let buf = [];
+
+// tap detection state
+let tapTimes = [];
+let pinchWasClosed = false;
+const PINCH_CLOSE = 0.045, PINCH_OPEN = 0.07; // hysteresis thresholds (normalized dist)
+
+function goertzelPower(samples, times, freq) {
+  // crude DFT power at a single frequency for a (possibly non-uniform-time) buffer
+  const n = samples.length;
+  if (n < 8) return 0;
+  const t0 = times[0];
+  let re = 0, im = 0;
+  for (let i = 0; i < n; i++) {
+    const w = 2 * Math.PI * freq * (times[i] - t0);
+    re += samples[i] * Math.cos(w);
+    im -= samples[i] * Math.sin(w);
+  }
+  return (re * re + im * im) / (n * n);
+}
+
+function detrend(samples) {
+  const n = samples.length;
+  const mean = samples.reduce((a, b) => a + b, 0) / n;
+  return samples.map((v) => v - mean);
+}
+
+function estimateTremor() {
+  if (buf.length < 20) return { freq: null, power: 0 };
+  const now = buf[buf.length - 1].t;
+  const recent = buf.filter((s) => now - s.t <= BUF_SECONDS);
+  const times = recent.map((s) => s.t);
+  const xs = detrend(recent.map((s) => s.x));
+  const ys = detrend(recent.map((s) => s.y));
+
+  let bestFreq = null, bestPower = -1;
+  for (let f = 2; f <= 15; f += 0.25) {
+    const p = goertzelPower(xs, times, f) + goertzelPower(ys, times, f);
+    if (p > bestPower) { bestPower = p; bestFreq = f; }
+  }
+  return { freq: bestFreq, power: bestPower };
+}
+
+// --- Archimedes spiral trace test (classic tremor test, e.g. NewHandPD dataset) ---
+let spiralPoints = [];
+let spiralSumSq = 0;
+let spiralCount = 0;
+
+function resetSpiralScore() {
+  spiralSumSq = 0;
+  spiralCount = 0;
+  spiralVal.textContent = "–";
+}
+
+function buildSpiral(cx, cy, maxRadius, turns = 4, numPoints = 500) {
+  const pts = [];
+  for (let i = 0; i <= numPoints; i++) {
+    const theta = (i / numPoints) * turns * 2 * Math.PI;
+    const r = maxRadius * (theta / (turns * 2 * Math.PI));
+    pts.push({ x: cx + r * Math.cos(theta), y: cy + r * Math.sin(theta) });
+  }
+  return pts;
+}
+
+function drawSpiralGuide() {
+  if (spiralPoints.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(spiralPoints[0].x, spiralPoints[0].y);
+  for (const p of spiralPoints) ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function nearestSpiralDist(x, y) {
+  let best = Infinity;
+  for (const p of spiralPoints) {
+    const d = Math.hypot(p.x - x, p.y - y);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function devColor(dist, maxDist = 60) {
+  const t = Math.max(0, Math.min(1, dist / maxDist));
+  const r = Math.round(60 + t * (255 - 60));
+  const g = Math.round(230 - t * (230 - 60));
+  return `rgb(${r},${g},60)`;
+}
+
+function updateTapDetection(dist, t) {
+  if (!pinchWasClosed && dist < PINCH_CLOSE) {
+    pinchWasClosed = true;
+    tapTimes.push(t);
+    tapTimes = tapTimes.filter((tt) => t - tt <= 5.0); // keep last 5s
+  } else if (pinchWasClosed && dist > PINCH_OPEN) {
+    pinchWasClosed = false;
+  }
+}
+
+const MODE_COLOR = { tremor: "#ff6a3d", tap: "#3dc9ff" };
+
+function drawGlowTrail(now) {
+  const trailMs = mode === "spiral" ? 4000 : TRAIL_MS;
+  trail = trail.filter((p) => now - p.t <= trailMs);
+  if (trail.length < 2) return;
+  ctx.save();
+  ctx.lineCap = "round";
+  for (let i = 1; i < trail.length; i++) {
+    const age = (now - trail[i].t) / trailMs;
+    const alpha = mode === "spiral" ? 0.9 : Math.max(0, (1 - age) * 0.9);
+    const color = mode === "spiral" ? trail[i].color : MODE_COLOR[mode];
+    ctx.globalAlpha = alpha;
+    ctx.shadowBlur = mode === "spiral" ? 10 : 18 * (1 - age);
+    ctx.shadowColor = color;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = mode === "spiral" ? 4 : 3 + 6 * (1 - age);
+    ctx.beginPath();
+    ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+    ctx.lineTo(trail[i].x, trail[i].y);
+    ctx.stroke();
+  }
+  const head = trail[trail.length - 1];
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 25;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(head.x, head.y, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+let lastFrameTime = performance.now();
+let handLandmarker;
+
+async function init() {
+  const fileset = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  handLandmarker = await HandLandmarker.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numHands: 1,
+  });
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 960, height: 720 },
+  });
+  video.srcObject = stream;
+  await new Promise((r) => (video.onloadedmetadata = r));
+  video.play();
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  video.width = video.videoWidth;
+  video.height = video.videoHeight;
+
+  const maxR = Math.min(canvas.width, canvas.height) * 0.42;
+  spiralPoints = buildSpiral(canvas.width / 2, canvas.height / 2, maxR);
+
+  loading.style.display = "none";
+  requestAnimationFrame(loop);
+}
+
+function loop() {
+  const now = performance.now();
+  const dtMs = now - lastFrameTime;
+  lastFrameTime = now;
+  fpsVal.textContent = Math.round(1000 / Math.max(dtMs, 1));
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const result = handLandmarker.detectForVideo(video, now);
+  if (result.landmarks && result.landmarks.length > 0) {
+    const lm = result.landmarks[0];
+    const ix = lm[INDEX_TIP].x * canvas.width;
+    const iy = lm[INDEX_TIP].y * canvas.height;
+    const tx = lm[THUMB_TIP].x * canvas.width;
+    const ty = lm[THUMB_TIP].y * canvas.height;
+
+    const tSec = now / 1000;
+    let devColorStr = null;
+    if (mode === "spiral") {
+      const dev = nearestSpiralDist(ix, iy);
+      spiralSumSq += dev * dev;
+      spiralCount += 1;
+      devColorStr = devColor(dev);
+    }
+    trail.push({ x: ix, y: iy, t: now, color: devColorStr });
+    buf.push({ t: tSec, x: lm[INDEX_TIP].x, y: lm[INDEX_TIP].y });
+    if (buf.length > 300) buf = buf.slice(-300);
+
+    const dist = Math.hypot(lm[INDEX_TIP].x - lm[THUMB_TIP].x, lm[INDEX_TIP].y - lm[THUMB_TIP].y);
+    updateTapDetection(dist, tSec);
+
+    freqVal.textContent = "–";
+    powVal.textContent = "–";
+    tapVal.textContent = "–";
+    spiralVal.textContent = "–";
+
+    if (mode === "tremor") {
+      const { freq, power } = estimateTremor();
+      freqVal.textContent = freq ? `${freq.toFixed(2)} Hz` : "–";
+      powVal.textContent = power ? power.toExponential(2) : "–";
+    } else if (mode === "tap") {
+      const recentTaps = tapTimes.filter((tt) => tSec - tt <= 5.0);
+      const rate = recentTaps.length >= 2
+        ? (recentTaps.length - 1) / (recentTaps[recentTaps.length - 1] - recentTaps[0] || 1)
+        : 0;
+      tapVal.textContent = `${rate.toFixed(2)} /s`;
+    } else if (mode === "spiral") {
+      if (spiralCount > 0) {
+        const rms = Math.sqrt(spiralSumSq / spiralCount);
+        spiralVal.textContent = `${rms.toFixed(1)} px`;
+      }
+    }
+
+    if (mode === "spiral") drawSpiralGuide();
+    drawGlowTrail(now);
+  } else if (mode === "spiral") {
+    drawSpiralGuide();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+init().catch((err) => {
+  loading.textContent = "Error: " + err.message + " (camera permission? try serving over http/https)";
+  console.error(err);
+});
+</script>
+</body>
+</html>
