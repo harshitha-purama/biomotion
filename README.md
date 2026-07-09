@@ -1,9 +1,9 @@
-# BioMotion — webcam hand-motion tracking for biomedical signal extraction
+# BioMotion — webcam-based quantitative motor assessment using MediaPipe and classical signal processing
 
-**Goal:** can a webcam + open-source hand-tracking model (MediaPipe) recover
-clinically meaningful motor signals — tremor frequency, tap decrement, joint
-ROM, bilateral asymmetry — using plain signal processing, with no medical
-dataset and no trained model?
+**Goal:** can a consumer webcam and MediaPipe recover clinically relevant
+motor metrics — tremor frequency, finger-tapping performance, joint range of
+motion, and bilateral asymmetry — using only classical signal processing, no
+medical dataset, and no trained model?
 
 ## What we built
 
@@ -46,8 +46,17 @@ the landmark CSV and generates the PSD plot below from that same take:
 |---|---|---|
 | still baseline | no peak | correct |
 | 2 Hz metronome | 2.04 Hz | matches (~2% error) |
-| 3 Hz metronome | 5.10 Hz | mismatch — drifted faster than metronome |
+| 3 Hz metronome | 5.10 Hz | mismatch (see below) |
 | 5 Hz metronome | no peak | not detected — webcam fps ceiling (~20fps, Nyquist limits reliable detection above ~5-6 Hz) |
+
+Inspection of the 3 Hz recording's trajectory plot showed the actual hand
+motion was tighter and faster than the intended pace — a genuine spectral
+peak near 5 Hz, not a harmonic artifact or a tracking glitch (the same
+signal was visible directly in the raw x/y trajectory, not just the
+spectrum). Most likely explanation: the participant drifted above the
+metronome's pace rather than the pipeline mis-detecting a slower motion.
+This wasn't independently confirmed against a second sensor, so it remains
+a plausible-but-unverified explanation rather than a proven one.
 
 <table>
 <tr>
@@ -102,8 +111,23 @@ Web demo: `cd web && python -m http.server 8000`, open `localhost:8000`.
 One row per hand per frame: `frame, t_sec, hand, handedness_score, lm0_x, lm0_y, lm0_z, ... lm20_x, lm20_y, lm20_z`
 (standard MediaPipe landmark indexing — see `landmarks.py`).
 
-## Extending
+## Limitations
 
-- Inter-finger independence during tapping (spasticity/coordination marker)
-- Grip aperture over time (reach-to-grasp kinematics)
-- Port the web spiral test into Python for offline scoring
+- Validated only on a healthy participant (self-recorded), not a clinical population.
+- Accuracy depends on webcam frame rate and lighting; tested at ~20-21fps.
+- Reliable tremor-frequency estimation is limited to roughly below 5-6 Hz at
+  that frame rate (Nyquist limit) — below the upper end of some clinical
+  tremor ranges (e.g. Parkinsonian rest tremor, essential tremor).
+- Not yet cross-validated against a second sensor (IMU, optical motion
+  capture) or a clinician-rated assessment — metronome/protractor checks are
+  a methods sanity check, not clinical validation.
+
+## Future work
+
+- Compare against a wearable IMU or optical motion capture on the same task,
+  for an independent accuracy check beyond a metronome/protractor.
+- Higher-frame-rate capture (phone camera, 60-120fps) to test whether the
+  ~5-6 Hz ceiling is a webcam artifact rather than a fundamental limit.
+- Inter-finger independence during tapping (spasticity/coordination marker).
+- Grip aperture over time (reach-to-grasp kinematics).
+- Port the web spiral test into Python for offline scoring.
