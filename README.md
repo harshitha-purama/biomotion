@@ -1,8 +1,8 @@
 # BioMotion — webcam hand-motion tracking for biomedical signal extraction
 
 **Goal:** can a webcam + open-source hand-tracking model (MediaPipe) recover
-clinically meaningful motor signals — tremor frequency, tap decrement, joint
-ROM, bilateral asymmetry — using plain signal processing, with no medical
+clinically meaningful motor signals:  tremor frequency, tap decrement, joint
+ROM, bilateral asymmetry  using plain signal processing, with no medical
 dataset and no trained model?
 
 ## What we built
