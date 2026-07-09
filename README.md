@@ -14,9 +14,15 @@ signals and extracts quantitative motor metrics from them (FFT/Welch peak
 detection, joint-angle geometry, decrement trend fitting) — the landmarks
 are the sensor, not the end product.
 
-```
-webcam -> MediaPipe -> 21 landmarks/hand -> filtering (detrend, high-pass)
-       -> FFT / peak-picking / joint-angle geometry -> motor metrics
+```mermaid
+flowchart LR
+    A[Webcam] --> B[MediaPipe<br/>HandLandmarker]
+    B --> C[21 landmarks<br/>per hand]
+    C --> D[Filtering<br/>detrend + high-pass]
+    D --> E[FFT / Welch<br/>peak-picking]
+    D --> F[Joint-angle<br/>geometry]
+    E --> G[Motor metrics]
+    F --> G
 ```
 
 | Metric | Clinical relevance |
