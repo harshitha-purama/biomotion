@@ -21,17 +21,34 @@ Two things live here:
 ## Demo
 
 <p align="center">
-  <img src="docs/demo.gif" width="480" alt="Live hand tracking with real-time tremor frequency readout">
+  <img src="docs/demo.gif" width="480" alt="Live bilateral hand tracking with real-time tremor frequency readout">
 </p>
 
-Hands-free 15-second clip, no face, live glowing fingertip trail + a live
-tremor-frequency readout computed the same way as `analyze_tremor.py`
-(Welch PSD + peak detection), not a canned animation. Recorded with:
+Hands-free 10-second clip, no face, both hands tracked simultaneously (index
+tip = glowing trail, thumb tip = connected pinch-line, so both fingertips
+are visibly detected), with a live per-hand tremor-frequency readout.
+Recorded with:
 ```
-python record_demo.py --seconds 15
+python record_demo.py --seconds 10
 ```
-It counts down 3s (time to position your hand(s) in frame), then records and
-auto-saves `docs/demo.mp4` + `docs/demo.gif` with no keypresses needed.
+It counts down 3s (time to position both hands in frame), then records and
+auto-saves everything from that one take:
+- `docs/demo.mp4` / `docs/demo.gif` -- the clip
+- `docs/demo.csv` -- full 21-landmark log, same schema as `capture.py`
+- `docs/demo_tremor_Left.png` / `docs/demo_tremor_Right.png` -- the actual
+  PSD/frequency-peak plot for each hand, generated from that exact session
+  (not a separate recording), so the video and the math behind it are
+  provably the same take.
+
+This take detected genuine in-band peaks for both hands -- **Left: 3.52 Hz,
+Right: 3.02 Hz** -- with clean sustained oscillation visible for the full
+clip, confirming the pipeline works live, not just in a controlled
+after-the-fact analysis:
+
+<p align="center">
+  <img src="docs/demo_tremor_Left.png" width="420">
+  <img src="docs/demo_tremor_Right.png" width="420">
+</p>
 
 ## Why this matters for rehab, not just as a demo
 
