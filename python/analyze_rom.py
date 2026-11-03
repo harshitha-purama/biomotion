@@ -2,9 +2,11 @@
 Per-finger joint-angle / range-of-motion (ROM) analysis.
 
 For each finger, computes the PIP joint angle (angle at the middle joint,
-between the MCP->PIP and PIP->DIP vectors) every frame from the 2D landmark
-positions, then reports the range of motion (max - min angle) achieved
-during the recording. This is a webcam replacement for a physical
+between the MCP->PIP and PIP->DIP vectors) every frame from the 3D landmark
+positions, then reports the range of motion (2nd to 98th percentile of the
+angle) achieved during the recording. 2D angles sweep through values a real
+joint cannot reach when the hand rotates, and single-frame tracking glitches
+would otherwise set the max and min. This is a webcam replacement for a physical
 goniometer, standard in rehab ROM tracking.
 
 Validate before trusting it: hold a printed protractor in frame, bend your
@@ -26,7 +28,7 @@ from load_csv import load_full_track
 
 
 def joint_angle_deg(a, b, c):
-    """Angle at point b formed by rays b->a and b->c, in degrees. a,b,c: (N,2) arrays."""
+    """Angle at point b formed by rays b->a and b->c, in degrees. a,b,c: (N,D) arrays."""
     v1 = a - b
     v2 = c - b
     dot = np.sum(v1 * v2, axis=1)
@@ -49,15 +51,16 @@ def main():
 
     fig, ax = plt.subplots(figsize=(9, 5))
     print(f"Hand: {hand_used}")
-    print(f"{'finger':<8} {'min (deg)':>10} {'max (deg)':>10} {'ROM (deg)':>10}")
+    print(f"{'finger':<8} {'p2 (deg)':>10} {'p98 (deg)':>10} {'ROM (deg)':>10}")
 
     for name, (mcp, pip, dip, tip) in LM.FINGERS.items():
-        a = lm[:, mcp, :2]
-        b = lm[:, pip, :2]
-        c = lm[:, dip, :2]
+        a = lm[:, mcp, :3]
+        b = lm[:, pip, :3]
+        c = lm[:, dip, :3]
         angles = joint_angle_deg(a, b, c)
-        rom = angles.max() - angles.min()
-        print(f"{name:<8} {angles.min():>10.1f} {angles.max():>10.1f} {rom:>10.1f}")
+        low, high = np.percentile(angles, [2, 98])
+        rom = high - low
+        print(f"{name:<8} {low:>10.1f} {high:>10.1f} {rom:>10.1f}")
         ax.plot(t, angles, label=f"{name} (ROM {rom:.0f}°)")
 
     ax.set_xlabel("time (s)")

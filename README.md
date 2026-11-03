@@ -65,7 +65,7 @@ the landmark CSV and generates the PSD plot below from that same take:
   <img src="docs/demo_tremor_Right.png" width="420">
 </p>
 
-**Result: Left 3.52 Hz, Right 3.02 Hz** — clean sustained in-band peaks, live, not post-hoc.
+**Result: Left 5.08 Hz, Right 3.25 Hz** (recomputed offline with the current detector, at the ~27 fps of this take).
 
 ## What we did to test it
 
@@ -79,21 +79,26 @@ the landmark CSV and generates the PSD plot below from that same take:
 
 ## Results
 
+One recording per condition, index fingertip, peak detector in `tremor_math.py`
+(6 s Welch window, 0.17 Hz resolution):
+
 | Target | Detected | Verdict |
 |---|---|---|
 | still baseline | no peak | correct |
-| 2 Hz metronome | 2.04 Hz | matches (~2% error) |
-| 3 Hz metronome | 5.10 Hz | mismatch (see below) |
-| 5 Hz metronome | no peak | not detected — webcam fps ceiling (~20fps, Nyquist limits reliable detection above ~5-6 Hz) |
+| 2 Hz metronome | 2.05 Hz | matches |
+| 3 Hz metronome | 4.97 Hz | ambiguous: a second peak at 3.01 Hz has the same power |
+| 5 Hz metronome | 4.98 Hz | matches |
 
-Inspection of the 3 Hz recording's trajectory plot showed the actual hand
-motion was tighter and faster than the intended pace — a genuine spectral
-peak near 5 Hz, not a harmonic artifact or a tracking glitch (the same
-signal was visible directly in the raw x/y trajectory, not just the
-spectrum). Most likely explanation: the participant drifted above the
-metronome's pace rather than the pipeline mis-detecting a slower motion.
-This wasn't independently confirmed against a second sensor, so it remains
-a plausible-but-unverified explanation rather than a proven one.
+The 3 Hz recording has two near-equal peaks, so it needs repeating before it can
+be called either way. Sampling is not the limit here: at ~21 fps the Nyquist
+frequency is ~10 Hz, and synthetic sine waves at 2-9 Hz, sampled on this
+recording's real frame timestamps, were recovered within 0.05 Hz. What limits
+detection is how much of the hand's motion falls in the band compared with
+slower arm movement.
+
+An earlier version used a 2 s window and measured peak prominence against the
+whole spectrum, so 1-2 Hz arm motion hid the 5 Hz peak. That was misread at the
+time as a frame-rate limit, and is fixed.
 
 <table>
 <tr>
@@ -116,7 +121,13 @@ Tap / decrement / ROM also run cleanly on real recordings:
 <img src="docs/images/rom.png" width="320">
 </p>
 
-10 taps @ 0.87/s, rhythm CV 0.42 · amplitude trend +1.9% (no decrement) · 176-178° ROM across fingers.
+10 taps @ 0.87/s, rhythm CV 0.42 · amplitude trend +1.9% (no decrement).
+
+ROM uses MediaPipe's 3D landmarks and the 2nd-98th percentile of the PIP angle. On this
+tapping recording it reads 106-142° across fingers, close to or above the ~100-110° a PIP
+joint moves. MediaPipe's depth is an estimate and this take was not a ROM task, so treat it
+as unvalidated until checked against a protractor. An earlier 2D version reported 176-178°,
+which is physically impossible and came from the hand rotating in view.
 
 ## Setup
 
@@ -153,9 +164,11 @@ One row per hand per frame: `frame, t_sec, hand, handedness_score, lm0_x, lm0_y,
 
 - Validated only on a healthy participant (self-recorded), not a clinical population.
 - Accuracy depends on webcam frame rate and lighting; tested at ~20-21fps.
-- Reliable tremor-frequency estimation is limited to roughly below 5-6 Hz at
-  that frame rate (Nyquist limit) — below the upper end of some clinical
-  tremor ranges (e.g. Parkinsonian rest tremor, essential tremor).
+- At ~21 fps the Nyquist frequency is ~10.5 Hz, so tremor above about 9 Hz cannot
+  be measured. Timing jitter and motion blur near that limit are untested on
+  real tremor.
+- One recording per frequency: no repeatability data yet.
+- ROM is not yet validated against a protractor or goniometer (see Results).
 - Not yet cross-validated against a second sensor (IMU, optical motion
   capture) or a clinician-rated assessment — metronome/protractor checks are
   a methods sanity check, not clinical validation.
@@ -164,8 +177,8 @@ One row per hand per frame: `frame, t_sec, hand, handedness_score, lm0_x, lm0_y,
 
 - Compare against a wearable IMU or optical motion capture on the same task,
   for an independent accuracy check beyond a metronome/protractor.
-- Higher-frame-rate capture (phone camera, 60-120fps) to test whether the
-  ~5-6 Hz ceiling is a webcam artifact rather than a fundamental limit.
+- Higher-frame-rate capture (phone camera, 60-120fps) to reduce motion blur and
+  extend the measurable band.
 - Inter-finger independence during tapping (spasticity/coordination marker).
 - Grip aperture over time (reach-to-grasp kinematics).
 - Port the web spiral test into Python for offline scoring.

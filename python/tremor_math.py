@@ -13,20 +13,19 @@ def resample_uniform(t, x, y):
     return t_uniform, x_u, y_u, fs
 
 
-def dominant_freq(x_u, y_u, fs, band=(2.0, 15.0), min_prominence_ratio=0.15,
-                   highpass_hz=1.0):
-    """Find a genuine spectral peak inside `band`, not just the highest point in
-    that window. A hand that isn't oscillating produces a power spectrum that
-    monotonically decays from 0 Hz -- naively taking argmax() over a band window
-    would then just report the band's left edge every time, even for a
-    perfectly still hand. scipy.signal.find_peaks requires an actual local
-    maximum (lower power on both sides) with prominence above a fraction of the
-    spectrum's peak power, so flat/monotonic spectra correctly report "no peak."
+def dominant_freq(x_u, y_u, fs, band=(2.0, 15.0), min_prominence_ratio=0.25,
+                  highpass_hz=1.0, window_sec=6.0):
+    """Find a genuine spectral peak inside `band`.
 
-    Slow arm/wrist drift during a "shake" also tends to dominate the spectrum
-    below ~1 Hz and can swamp a real, smaller tremor-band peak -- a Butterworth
-    high-pass filter removes that before Welch's method, so the oscillatory
-    component (not overall hand travel) is what gets compared against the band.
+    Two rules keep this honest:
+    - A long Welch window (`window_sec`). A 2 s window gives 0.5 Hz resolution,
+      too coarse to tell 2.0 Hz from 2.4 Hz.
+    - Prominence is relative to the strongest power *inside the band*. Measuring
+      it against the whole spectrum lets sub-band arm motion (1-2 Hz) hide a
+      real in-band peak. A still hand has no such peak and reports "no peak".
+
+    Peaks are searched on the whole spectrum and then filtered to the band, so
+    a peak sitting exactly on the band edge is not lost.
     """
     x_d = signal.detrend(x_u)
     y_d = signal.detrend(y_u)
@@ -36,16 +35,20 @@ def dominant_freq(x_u, y_u, fs, band=(2.0, 15.0), min_prominence_ratio=0.15,
         x_d = signal.sosfiltfilt(sos, x_d)
         y_d = signal.sosfiltfilt(sos, y_d)
 
-    nperseg = min(len(x_d), int(fs * 2))
-    f, pxx = signal.welch(x_d, fs=fs, nperseg=nperseg)
-    _, pyy = signal.welch(y_d, fs=fs, nperseg=nperseg)
+    nperseg = min(len(x_d), int(fs * window_sec))
+    nfft = 4 * nperseg
+    f, pxx = signal.welch(x_d, fs=fs, nperseg=nperseg, nfft=nfft)
+    _, pyy = signal.welch(y_d, fs=fs, nperseg=nperseg, nfft=nfft)
     power = pxx + pyy
 
-    if power.max() <= 0:
+    upper = min(band[1], 0.9 * fs / 2)  # stay clear of Nyquist (fs / 2)
+    in_band = (f >= band[0]) & (f <= upper)
+    if power.max() <= 0 or not in_band.any():
         return None, None, f, power, x_d, y_d
 
-    peaks, _ = signal.find_peaks(power, prominence=power.max() * min_prominence_ratio)
-    band_peaks = peaks[(f[peaks] >= band[0]) & (f[peaks] <= band[1])]
+    band_max = power[in_band].max()
+    peaks, _ = signal.find_peaks(power, prominence=band_max * min_prominence_ratio)
+    band_peaks = peaks[(f[peaks] >= band[0]) & (f[peaks] <= upper)]
     if len(band_peaks) == 0:
         return None, None, f, power, x_d, y_d
 
